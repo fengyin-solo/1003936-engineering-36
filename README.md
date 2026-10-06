@@ -57,7 +57,7 @@ npm run build
 | 应急演练 | `drill` | 演练记录 | 演练编号、隐患点编号、演练主题 |
 | 监测设备 | `device` | 监测设备 | 设备编号、设备类型、所属隐患点 |
 | 灾情速报 | `report` | 灾情速报 | 速报编号、隐患点编号、发生时间 |
-| 防灾宣传 | `propaganda` | 宣传活动 | 活动编号、宣传主题、宣传方式 |
+| 防灾宣传 | `propaganda` | 宣传活动 | 活动编号、宣传主题、宣传方式、所属乡镇、覆盖村组 |
 | 承建单位 | `contract` | 承建单位 | 单位编号、单位名称、资质等级 |
 | 群测群防培训 | `training` | 培训记录 | 培训编号、培训主题、培训对象 |
 
@@ -69,3 +69,42 @@ npm run build
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
 - 想回到初始数据：清掉浏览器里 `geohazard-monitor-prevention:entries` 这一项，或调用 `resetModule(模块)`。
+
+## 存量数据迁移
+
+本地数据带版本号（当前 v2），存在 `geohazard-monitor-prevention:entries` 一个 key 里，
+结构是 `{ schemaVersion, rows, history }` 信封。每次启动时 `local-store.ts` 检查版本，
+把未执行的迁移（`frontend/src/data/migrations.ts`）按序跑完：
+
+- **整批原子生效**：所有迁移在内存里算完并通过结构校验后，才整封替换落盘；
+  任何一步失败，存储原样不动（整批回退），页面继续用迁移前的数据。
+- **可重复执行**：迁移按版本号去重，跑过的不会再跑；迁移本身幂等，
+  重复执行零变更、不追加记录。
+- **可复现诊断**：每次迁移的结果（扫描/改写/补齐/无法归属条数、逐字段变更、
+  输入输出指纹）整封覆盖写入 `geohazard-monitor-prevention:diagnostics`；
+  迁移前的原始报文备份在 `geohazard-monitor-prevention:backup`（只写一次），
+  同样的输入永远得到同样的指纹。运营概览页底部能看到最近一次诊断。
+- **环境一致**：迁移代码打进前端 bundle，在 `npm run dev`、`npm run preview`、
+  docker 部署里走的是同一份逻辑，不依赖任何环境变量。
+
+当前迁移 `propaganda-coverage-v2`（v1 → v2）修复防灾宣传存量：
+
+1. 旧状态名（如「已结束」「取消」）映射到现行状态，业务字段「活动状态」与系统状态对齐；
+2. 「覆盖村组」兼容旧写法（纯数量、占位文本、各种分隔符），归一成规范村组名单；
+3. 缺覆盖村组的按「所属乡镇」从基础数据（`frontend/src/data/regions.ts`，乡镇→村组）
+   补齐；乡镇缺失的从可识别村组反推；
+4. 仍无法归属的记录不丢不编：保留原文、标异常，单独列进诊断报告。
+
+隐患点提醒与宣传覆盖数共用同一份基础数据和同一份宣传记录
+（`frontend/src/api/coverage.ts` 的 `buildCoverage`），运营总览、宣传页统计卡
+都从这儿取数，口径天然一致。
+
+## 测试
+
+```bash
+cd frontend
+npm test
+```
+
+覆盖：迁移的补齐/归一/无法归属/幂等/回退、覆盖派生口径一致、本地存储引导迁移
+（旧数据升级、重复启动不追加、失败回退、损坏报文隔离）。

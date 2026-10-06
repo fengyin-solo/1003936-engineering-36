@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>防灾宣传管理</h2>
-        <p class="page-desc">维护宣传活动，围绕活动编号、宣传主题、宣传方式、覆盖村组做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护宣传活动，围绕活动编号、宣传主题、宣传方式、所属乡镇、覆盖村组做登记、筛选与状态流转。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记宣传活动</button>
@@ -65,6 +65,9 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条防灾宣传记录</span>
+      <span v-if="unmatchedCount > 0" class="error-text">
+        有 {{ unmatchedCount }} 条记录无法归属乡镇，已在运营概览的迁移诊断里单独列出
+      </span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -73,6 +76,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import { propagandaStats } from '@/api/coverage'
 import {
   downloadEntries,
   listEntries,
@@ -82,16 +86,22 @@ import {
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('propaganda')
-const columns = ["活动编号", "宣传主题", "宣传方式", "覆盖村组", "活动日期", "参与人数", "组织人", "活动状态"]
+const columns = ["活动编号", "宣传主题", "宣传方式", "所属乡镇", "覆盖村组", "活动日期", "参与人数", "组织人", "活动状态"]
 const actions = ["开展活动", "确认完成", "取消活动"]
 const statuses = ["待开展", "进行中", "已完成", "已取消"]
-const stats = [{"label": "本月活动数", "value": 0}, {"label": "已完成数", "value": 0}, {"label": "覆盖人次", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+// 统计卡与运营总览共用同一份宣传记录（不受筛选条件影响），两处数字才一致。
+const stats = ref([
+  { label: '本月活动数', value: 0 },
+  { label: '已完成数', value: 0 },
+  { label: '覆盖人次', value: 0 },
+])
+const unmatchedCount = ref(0)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +138,14 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    const all = listEntries(meta.key).items
+    const summary = propagandaStats(all)
+    stats.value = [
+      { label: '本月活动数', value: summary.monthActivities },
+      { label: '已完成数', value: summary.finished },
+      { label: '覆盖人次', value: summary.reachedPeople },
+    ]
+    unmatchedCount.value = all.filter((row) => row.abnormal).length
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '防灾宣传列表读取失败'
   }

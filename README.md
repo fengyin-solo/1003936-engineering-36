@@ -69,3 +69,40 @@ npm run build
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
 - 想回到初始数据：清掉浏览器里 `geohazard-monitor-prevention:entries` 这一项，或调用 `resetModule(模块)`。
+
+## 存量数据迁移
+
+存储是带版本的信封 `{ version, data }`。旧版（v1，无信封的裸数据）首次读取时自动执行
+`frontend/src/data/migrations.ts` 里的迁移链，升级到 `STORAGE_VERSION`：
+
+- **按所属乡镇补齐村组**：乡镇 → 村组目录在 `frontend/src/data/directory.ts`，是宣传批次与
+  隐患点提醒共用的同一份基础数据。旧版「覆盖村组」里存乡镇名或部分村组的，归属后补齐为全镇
+  村组；占位样例、目录外乡镇等无法归属的记录不猜不改，单独列入诊断报告。
+- **状态归一**：「已结束 / 开展中 / 计划中」等旧写法映射到现行口径（待开展 / 进行中 / 已完成 / 已取消）。
+- **幂等**：迁移只原地修正、绝不追加行；版本已最新时不执行，强制重跑同一迁移也是收敛的。
+- **整批回退**：迁移在数据副本上进行，任一步失败主键保持原样，应用继续用迁移前数据运行。
+- **可复现诊断**：报告含行级决策（按 id 排序）、无法归属清单与 FNV-1a 输入/输出校验和，
+  同一输入永远得到同一报告。报告落在 localStorage 的
+  `geohazard-monitor-prevention:migration-report`，可在「防灾宣传」页查看并下载；
+  迁移前原文备份在 `geohazard-monitor-prevention:backup-v<旧版本>`，可手工回滚。
+
+迁移代码是纯函数、不依赖浏览器 API，本地开发、构建预览与部署产物跑的是同一份源码。
+宣传覆盖数由 `frontend/src/api/coverage.ts` 统一计算，运营总览与防灾宣传页的隐患点提醒
+都取自这里，两处数字必然一致。
+
+验证迁移（升级、幂等、回退、诊断可复现、端到端存储升级，共 25 项断言）：
+
+```bash
+cd frontend
+npm run verify:migration   # 或仓库根目录 make verify
+```
+
+手工复现一次迁移：在浏览器控制台把旧版数据写回再刷新——
+
+```js
+localStorage.setItem('geohazard-monitor-prevention:entries', JSON.stringify({
+  propaganda: [{ id: 1, status: '已结束', pending: false, abnormal: false,
+    活动编号: 'PROP-0001', 覆盖村组: '青云镇' }],
+}))
+location.reload()
+```
